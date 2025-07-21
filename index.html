@@ -460,7 +460,6 @@
         }
         
         // 初始化地图
-        // 替换 initMap 函数
         function initMap() {
             try {
                 // 初始化 Leaflet 地图
@@ -475,11 +474,15 @@
                 // 添加标记
                 const marker = L.marker([22.30184, 114.184478]).addTo(map);
 
+                // 添加轨迹图层
+                const polyline = L.polyline([], { color: 'blue' }).addTo(map);
+
                 // 更新地图位置的函数
                 window.updateMapPosition = function (lng, lat) {
                     const position = [lat, lng];
                     marker.setLatLng(position);
                     map.setView(position, map.getZoom());
+                    polyline.addLatLng(position); // 添加轨迹点
                     document.getElementById('positionStatus').textContent =
                         `经度: ${lng.toFixed(6)}, 纬度: ${lat.toFixed(6)}`;
                 };
