@@ -1,0 +1,31 @@
+# macOS系统文件
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 资源文件目录
+**/.DS_Store
+**/.AppleDouble
+**/.LSOverride
+
+# 临时文件
+*.swp
+*.swo
+*~
+~$*
+
+# 隐藏文件
+._*
+
+# 缓存目录
+**/.Trashes
+**/.Spotlight-V100
+**/.TemporaryItems
+**/.fseventsd
+**/.VolumeIcon.icns
+**/.apdisk
+
+# Xcode相关
+**/xcuserdata
+**/DerivedData
+**/build
