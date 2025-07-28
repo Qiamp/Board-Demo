@@ -7,137 +7,698 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
-    <!-- MQTT.js 库 -->
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    
+    <!-- 添加图标字体 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- 添加苹果字体 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
     <style>
-        body { font-family: 'Microsoft YaHei', sans-serif; margin: 20px; }
-        .container { display: flex; flex-wrap: wrap; gap: 20px; }
-        .chart-container { width: 45%; min-width: 400px; height: 400px; margin-bottom: 25px; }
-        #map-container { width: 100%; height: 500px; margin-top: 50px; border: 1px solid #ccc; }
-        .status-panel { padding: 10px; background: #f5f5f5; border-radius: 5px; margin-bottom: 15px; }
-        h3 {margin-top: 20px; margin-bottom: 20px; padding-bottom: 5px; border-bottom: 1px solid #eee; }
-        .chart-header {display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-        .debug-panel { padding: 10px; background: #e9f3ff; border-radius: 5px; margin-bottom: 15px; }
-        .button-group { margin-top: 10px; }
-        .button-group button { margin-right: 10px; padding: 5px 10px; }
-        
-        /* MQTT 配置面板样式 */
-        .mqtt-config-panel { 
-            padding: 15px; 
-            background: #fff3cd; 
-            border: 1px solid #ffeaa7; 
-            border-radius: 5px; 
-            margin-bottom: 20px; 
-            display: block;
+        * { 
+            box-sizing: border-box; 
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
-        .mqtt-config-panel.hidden { display: none; }
+        
+        body { 
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif; 
+            margin: 0; 
+            padding: 24px; 
+            background: #f5f7fa;
+            min-height: 100vh;
+            color: #1d1d1f;
+            font-weight: 400;
+            letter-spacing: -0.011em;
+            line-height: 1.47059;
+        }
+        
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 20px;
+            overflow: hidden;
+            border: 1px solid rgba(0,0,0,0.04);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #ffffff00 0%, #ffffff00 100%);
+            color: white;
+            padding: 32px 32px 40px;
+            text-align: center;
+        }
+        
+        .logo-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 24px;
+            gap: 32px;
+        }
+        
+        .logo-container img {
+            height: 170px;
+            width: auto;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            padding: 8px;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 600;
+            letter-spacing: -0.022em;
+            line-height: 1.08349;
+            color: #064f9e; /* 修改为您需要的颜色，例如蓝色 */
+        }
+        
+        .content {
+            padding: 32px;
+        }
+        
+        /* MQTT 配置面板样式 - iOS风格 */
+        .mqtt-config-panel { 
+            background: #ffffff;
+            border: 1px solid #e5e5e7;
+            border-radius: 16px;
+            margin-bottom: 32px;
+            padding: 24px;
+            transition: all 0.2s ease;
+        }
+        
+        .mqtt-config-panel.hidden { 
+            display: none; 
+        }
+        
+        .config-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        
+        .config-header i {
+            font-size: 1.3em;
+            margin-right: 12px;
+            color: #007aff;
+        }
+        
+        .config-header h3 {
+            margin: 0;
+            color: #1d1d1f;
+            font-size: 1.125em;
+            font-weight: 600;
+            letter-spacing: -0.022em;
+        }
+        
         .config-row { 
             display: flex; 
             align-items: center; 
-            margin-bottom: 10px; 
-            gap: 10px; 
+            margin-bottom: 20px; 
+            gap: 16px; 
         }
+        
         .config-row label { 
-            min-width: 80px; 
-            font-weight: bold; 
+            min-width: 110px; 
+            font-weight: 500;
+            color: #1d1d1f;
+            font-size: 0.9em;
         }
+        
         .config-row input { 
             flex: 1; 
-            padding: 5px; 
-            border: 1px solid #ddd; 
-            border-radius: 3px; 
+            padding: 12px 16px; 
+            border: 1px solid #d2d2d7; 
+            border-radius: 12px;
+            font-size: 15px;
+            transition: all 0.2s ease;
+            background: #ffffff;
+            font-family: inherit;
         }
-        .connect-button { 
-            background: #28a745; 
-            color: white; 
-            border: none; 
-            padding: 10px 20px; 
-            border-radius: 5px; 
-            cursor: pointer; 
-            font-size: 14px; 
+        
+        .config-row input:focus {
+            outline: none;
+            border-color: #007aff;
+            background: #ffffff;
         }
-        .connect-button:hover { background: #218838; }
-        .disconnect-button { 
-            background: #dc3545; 
-            color: white; 
-            border: none; 
-            padding: 10px 20px; 
-            border-radius: 5px; 
-            cursor: pointer; 
-            font-size: 14px; 
+        
+        .button-container {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-top: 24px;
         }
-        .disconnect-button:hover { background: #c82333; }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+            letter-spacing: -0.011em;
+            min-height: 44px;
+        }
+        
+        .btn:hover {
+            transform: scale(0.98);
+        }
+        
+        .btn:active {
+            transform: scale(0.96);
+        }
+        
+        .btn-primary {
+            background: #007aff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #0056cc;
+        }
+        
+        .btn-danger {
+            background: #ff3b30;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #d70015;
+        }
+        
+        .btn-secondary {
+            background: #8e8e93;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #636366;
+        }
+        
+        .btn-info {
+            background: #5ac8fa;
+            color: white;
+        }
+        
+        .btn-info:hover {
+            background: #007aff;
+        }
+        
+        /* 状态面板 - iOS卡片风格 */
+        .status-panels {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+        
+        .status-panel, .debug-panel { 
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid #e5e5e7;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+            padding: 0;
+        }
+        
+        .status-item i {
+            width: 20px;
+            margin-right: 12px;
+            color: #8e8e93;
+            font-size: 0.9em;
+        }
+        
+        .status-label {
+            font-weight: 500;
+            margin-right: 12px;
+            color: #1d1d1f;
+            font-size: 0.9em;
+        }
+        
+        .status-value {
+            color: #3a3a3c;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+            font-size: 0.85em;
+        }
+        
+        .connection-status {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .status-connected { background: #d1f2eb; color: #00c896; }
+        .status-connecting { background: #fff3cd; color: #f1c40f; }
+        .status-disconnected { background: #f8d7da; color: #dc3545; }
+        .status-error { background: #f5c6cb; color: #721c24; }
+        
+        /* 图表容器 - iOS风格 */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+        
+        .chart-container { 
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid #e5e5e7;
+        }
+        
+        .chart-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #f2f2f7;
+        }
+        
+        .chart-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #1d1d1f;
+            letter-spacing: -0.022em;
+        }
+        
+        .chart-title i {
+            color: #007aff;
+            font-size: 0.9em;
+        }
+        
+        .chart-canvas {
+            height: 300px;
+        }
+        
+        /* 地图容器 */
+        .map-section {
+            margin-top: 32px;
+        }
+        
+        .map-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            gap: 12px;
+        }
+        
+        .map-header i {
+            color: #34c759;
+            font-size: 1.3em;
+        }
+        
+        .map-header h3 {
+            margin: 0;
+            color: #1d1d1f;
+            font-weight: 600;
+            font-size: 1.25em;
+            letter-spacing: -0.022em;
+        }
+        
+        #map-container { 
+            width: 100%; 
+            height: 500px; 
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid #e5e5e7;
+        }
+        
+        /* 工具提示 - iOS风格 */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 200px;
+            background-color: rgba(0,0,0,0.85);
+            backdrop-filter: blur(20px);
+            color: #fff;
+            text-align: center;
+            border-radius: 12px;
+            padding: 12px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        /* 加载动画 - iOS风格 */
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007aff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            body { padding: 16px; }
+            
+            .content { padding: 24px; }
+            
+            .logo-container {
+                flex-direction: column;
+                gap: 16px;
+            }
+            
+            .logo-container img {
+                height: 60px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .config-row {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 12px;
+            }
+            
+            .config-row label {
+                min-width: auto;
+            }
+            
+            .button-container {
+                flex-direction: column;
+            }
+            
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .chart-container {
+                min-width: auto;
+            }
+            
+            .status-panels {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* 暗色主题适配 */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background: #000000;
+                color: #f2f2f7;
+            }
+            
+            .main-container {
+                background: #1c1c1e;
+                border: 1px solid #38383a;
+            }
+            
+            .chart-container, .status-panel, .debug-panel, .mqtt-config-panel {
+                background: #1c1c1e;
+                border: 1px solid #38383a;
+                color: #f2f2f7;
+            }
+            
+            .config-row input {
+                background: #2c2c2e;
+                border: 1px solid #48484a;
+                color: #f2f2f7;
+            }
+            
+            .config-row input:focus {
+                border-color: #0a84ff;
+            }
+            
+            .status-label {
+                color: #f2f2f7;
+            }
+            
+            .status-value {
+                color: #aeaeb2;
+            }
+            
+            .chart-title {
+                color: #f2f2f7;
+            }
+            
+            .map-header h3 {
+                color: #f2f2f7;
+            }
+            
+            .config-header h3 {
+                color: #f2f2f7;
+            }
+        }
+        
+        /* 自定义滚动条 - iOS风格 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(0,0,0,0.2);
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(0,0,0,0.3);
+        }
+        
+        /* 输入框聚焦动画 */
+        .config-row input {
+            transform: scale(1);
+        }
+        
+        .config-row input:focus {
+            transform: scale(1.02);
+        }
+        
+        /* 按钮点击反馈 */
+        .btn {
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
     </style>
 </head>
 <body>
-    <!-- logo 容器 -->
-    <div style="display: flex; align-items: center; margin-bottom: 5px;">
-        <img src="./polyu.png" alt="Logo 1" style="height: 170px; width: auto; margin-right: 5px;">
-        <img src="./taslab.png" alt="Logo 2" style="height: 170px; width: auto;">
+    <div class="main-container">
+        <div class="header">
+            <div class="logo-container">
+                <img src="./polyu.png" alt="PolyU Logo" title="香港理工大学">
+                <img src="./taslab.png" alt="TAS Lab Logo" title="TAS 实验室">
+            </div>
+            <h1><i class="fas fa-satellite"></i> 惯性单元 & 定位导航系统 实时数据可视化</h1>
+        </div>
+        
+        <div class="content">
+            <!-- MQTT 配置面板 -->
+            <div id="mqttConfigPanel" class="mqtt-config-panel">
+                <div class="config-header">
+                    <i class="fas fa-network-wired"></i>
+                    <h3>MQTT 连接配置</h3>
+                </div>
+                
+                <div class="config-row">
+                    <label><i class="fas fa-user"></i> 客户端 ID:</label>
+                    <input type="text" id="clientId" placeholder="输入您的客户端ID" value="web_client_123">
+                </div>
+                
+                <div class="config-row">
+                    <label><i class="fas fa-id-badge"></i> 用户名:</label>
+                    <input type="text" id="username" placeholder="输入MQTT用户名">
+                </div>
+                
+                <div class="config-row">
+                    <label><i class="fas fa-lock"></i> 密码:</label>
+                    <input type="password" id="password" placeholder="输入MQTT密码">
+                </div>
+                
+                <div class="button-container">
+                    <button class="btn btn-primary" onclick="connectMQTT()">
+                        <i class="fas fa-plug"></i> 连接 MQTT
+                    </button>
+                    <button class="btn btn-danger" onclick="disconnectMQTT()">
+                        <i class="fas fa-unlink"></i> 断开连接
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 状态面板 -->
+            <div class="status-panels">
+                <div class="status-panel">
+                    <div class="status-item">
+                        <i class="fas fa-wifi"></i>
+                        <span class="status-label">MQTT 状态:</span>
+                        <span id="mqttStatus" class="connection-status status-disconnected">未连接</span>
+                    </div>
+                    
+                    <div class="status-item">
+                        <i class="fas fa-map-marker-alt"></i>
+                        <span class="status-label">GNSS 位置:</span>
+                        <span id="positionStatus" class="status-value">等待数据...</span>
+                    </div>
+                    
+                    <div class="status-item">
+                        <i class="fas fa-microchip"></i>
+                        <span class="status-label">惯性单元1 数据点:</span>
+                        <span id="imu0Count" class="status-value">0</span>
+                    </div>
+                    
+                    <div class="status-item">
+                        <i class="fas fa-microchip"></i>
+                        <span class="status-label">惯性单元2 数据点:</span>
+                        <span id="imu1Count" class="status-value">0</span>
+                    </div>
+                    
+                    <div class="button-container" style="margin-top: 15px;">
+                        <button class="btn btn-secondary" onclick="clearData()">
+                            <i class="fas fa-trash"></i> 清空数据
+                        </button>
+                        <button class="btn btn-info" onclick="showConfig()">
+                            <i class="fas fa-cog"></i> 显示配置
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="debug-panel">
+                    <div class="status-item">
+                        <i class="fas fa-envelope"></i>
+                        <span class="status-label">最后消息:</span>
+                        <span id="lastMessage" class="status-value">无</span>
+                    </div>
+                    
+                    <div class="status-item">
+                        <i class="fas fa-counter"></i>
+                        <span class="status-label">消息计数:</span>
+                        <span id="messageCount" class="status-value">0</span>
+                    </div>
+                    
+                    <div class="status-item">
+                        <i class="fas fa-tachometer-alt"></i>
+                        <span class="status-label">更新频率:</span>
+                        <span id="updateFreq" class="status-value">0</span> 次/秒
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 图表网格 -->
+            <div class="charts-grid">
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <div class="chart-title">
+                            <i class="fas fa-sync-alt"></i>
+                            <span>惯性单元1 角速度 (°/s)</span>
+                        </div>
+                        <div class="tooltip">
+                            <i class="fas fa-info-circle" style="color: #7f8c8d;"></i>
+                            <span class="tooltiptext">显示惯性单元1传感器的三轴角速度数据</span>
+                        </div>
+                    </div>
+                    <div class="chart-canvas">
+                        <canvas id="imu0AngularVelocityChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <div class="chart-title">
+                            <i class="fas fa-arrows-alt"></i>
+                            <span>惯性单元1 线加速度 (m/s²)</span>
+                        </div>
+                        <div class="tooltip">
+                            <i class="fas fa-info-circle" style="color: #7f8c8d;"></i>
+                            <span class="tooltiptext">显示惯性单元1传感器的三轴线性加速度数据</span>
+                        </div>
+                    </div>
+                    <div class="chart-canvas">
+                        <canvas id="imu0LinearAccelerationChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <div class="chart-title">
+                            <i class="fas fa-sync-alt"></i>
+                            <span>惯性单元2 角速度 (°/s)</span>
+                        </div>
+                        <div class="tooltip">
+                            <i class="fas fa-info-circle" style="color: #7f8c8d;"></i>
+                            <span class="tooltiptext">显示惯性单元2传感器的三轴角速度数据</span>
+                        </div>
+                    </div>
+                    <div class="chart-canvas">
+                        <canvas id="imu1AngularVelocityChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <div class="chart-title">
+                            <i class="fas fa-arrows-alt"></i>
+                            <span>惯性单元2 线加速度 (m/s²)</span>
+                        </div>
+                        <div class="tooltip">
+                            <i class="fas fa-info-circle" style="color: #7f8c8d;"></i>
+                            <span class="tooltiptext">显示惯性单元2传感器的三轴线性加速度数据</span>
+                        </div>
+                    </div>
+                    <div class="chart-canvas">
+                        <canvas id="imu1LinearAccelerationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 地图部分 -->
+            <div class="map-section">
+                <div class="map-header">
+                    <i class="fas fa-globe"></i>
+                    <h3>GNSS 实时位置</h3>
+                </div>
+                <div id="map-container"></div>
+            </div>
+        </div>
     </div>
-
-    <h1>IMU & GNSS 实时数据可视化 (MQTT)</h1>
-    
-    <!-- MQTT 配置面板 -->
-    <div id="mqttConfigPanel" class="mqtt-config-panel">
-        <h3>MQTT 连接配置</h3>
-        <div class="config-row">
-            <label>客户端 ID:</label>
-            <input type="text" id="clientId" placeholder="输入您的客户端ID" value="web_client_123">
-        </div>
-        <div class="config-row">
-            <label>用户名:</label>
-            <input type="text" id="username" placeholder="输入MQTT用户名">
-        </div>
-        <div class="config-row">
-            <label>密码:</label>
-            <input type="password" id="password" placeholder="输入MQTT密码">
-        </div>
-        <div class="config-row">
-            <button class="connect-button" onclick="connectMQTT()">连接 MQTT</button>
-            <button class="disconnect-button" onclick="disconnectMQTT()">断开连接</button>
-        </div>
-    </div>
-    
-    <div class="status-panel">
-        <p>MQTT 状态: <span id="mqttStatus">未连接</span></p>
-        <p>GNSS 位置: <span id="positionStatus">等待数据...</span></p>
-        <p>IMU0 数据点: <span id="imu0Count">0</span></p>
-        <p>IMU1 数据点: <span id="imu1Count">0</span></p>
-        <div class="button-group">
-            <button onclick="clearData()">清空数据</button>
-            <button onclick="showConfig()">显示配置</button>
-        </div>
-    </div>
-    
-    <div class="debug-panel">
-        <p>最后接收消息: <span id="lastMessage">无</span></p>
-        <p>消息计数: <span id="messageCount">0</span></p>
-        <p>更新频率: <span id="updateFreq">0</span> 次/秒</p>
-    </div>
-    
-    <div class="container">
-        <div class="chart-container">
-            <h3>IMU0 角速度 (degree/s)</h3>
-            <canvas id="imu0AngularVelocityChart"></canvas>
-        </div>
-        <div class="chart-container">
-            <h3>IMU0 线加速度 (m/s²)</h3>
-            <canvas id="imu0LinearAccelerationChart"></canvas>
-        </div>
-        <div class="chart-container">
-            <h3>IMU1 角速度 (degree/s)</h3>
-            <canvas id="imu1AngularVelocityChart"></canvas>
-        </div>
-        <div class="chart-container">
-            <h3>IMU1 线加速度 (m/s²)</h3>
-            <canvas id="imu1LinearAccelerationChart"></canvas>
-        </div>
-    </div>
-    
-    <h3>GNSS 位置</h3>
-    <div id="map-container"></div>
 
     <script>
         // MQTT 配置（固定部分）
@@ -183,9 +744,12 @@
             const password = document.getElementById('password').value.trim();
             
             if (!clientId || !username || !password) {
-                alert('请填写完整的MQTT连接信息!');
+                showNotification('请填写完整的MQTT连接信息!', 'warning');
                 return;
             }
+            
+            // 更新状态
+            updateConnectionStatus('connecting');
             
             const options = {
                 clientId: clientId,
@@ -196,27 +760,24 @@
                 reconnectPeriod: MQTT_CONFIG.reconnectPeriod
             };
             
-            document.getElementById('mqttStatus').textContent = '正在连接...';
-            document.getElementById('mqttStatus').style.color = 'blue';
-            
             try {
                 mqttClient = mqtt.connect(MQTT_CONFIG.broker, options);
                 
                 mqttClient.on('connect', () => {
                     console.log('MQTT 连接成功');
-                    document.getElementById('mqttStatus').textContent = '已连接';
-                    document.getElementById('mqttStatus').style.color = 'green';
+                    updateConnectionStatus('connected');
+                    showNotification('MQTT 连接成功!', 'success');
                     
-                    // 订阅主题
                     mqttClient.subscribe(MQTT_CONFIG.topic, { qos: MQTT_CONFIG.qos }, (err) => {
                         if (err) {
                             console.error('订阅失败:', err);
+                            showNotification('订阅主题失败', 'error');
                         } else {
                             console.log('订阅成功:', MQTT_CONFIG.topic);
+                            showNotification('订阅主题成功', 'success');
                         }
                     });
                     
-                    // 隐藏配置面板
                     document.getElementById('mqttConfigPanel').classList.add('hidden');
                 });
                 
@@ -226,35 +787,122 @@
                 
                 mqttClient.on('error', (error) => {
                     console.error('MQTT 错误:', error);
-                    document.getElementById('mqttStatus').textContent = '连接错误';
-                    document.getElementById('mqttStatus').style.color = 'red';
+                    updateConnectionStatus('error');
+                    showNotification('MQTT 连接错误: ' + error.message, 'error');
                 });
                 
                 mqttClient.on('close', () => {
-                    document.getElementById('mqttStatus').textContent = '已断开';
-                    document.getElementById('mqttStatus').style.color = 'gray';
+                    updateConnectionStatus('disconnected');
                 });
                 
                 mqttClient.on('reconnect', () => {
-                    document.getElementById('mqttStatus').textContent = '重连中...';
-                    document.getElementById('mqttStatus').style.color = 'orange';
+                    updateConnectionStatus('connecting');
                 });
                 
             } catch (error) {
                 console.error('MQTT 连接失败:', error);
-                document.getElementById('mqttStatus').textContent = '连接失败';
-                document.getElementById('mqttStatus').style.color = 'red';
+                updateConnectionStatus('error');
+                showNotification('MQTT 连接失败: ' + error.message, 'error');
             }
         }
+        
+        // 更新连接状态显示
+        function updateConnectionStatus(status) {
+            const statusElement = document.getElementById('mqttStatus');
+            statusElement.className = 'connection-status';
+            
+            switch(status) {
+                case 'connected':
+                    statusElement.classList.add('status-connected');
+                    statusElement.innerHTML = '<i class="fas fa-check-circle"></i> 已连接';
+                    break;
+                case 'connecting':
+                    statusElement.classList.add('status-connecting');
+                    statusElement.innerHTML = '<i class="loading"></i> 连接中...';
+                    break;
+                case 'disconnected':
+                    statusElement.classList.add('status-disconnected');
+                    statusElement.innerHTML = '<i class="fas fa-times-circle"></i> 未连接';
+                    break;
+                case 'error':
+                    statusElement.classList.add('status-error');
+                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 连接错误';
+                    break;
+            }
+        }
+        
+        // 通知系统
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 24px;
+                right: 24px;
+                padding: 16px 20px;
+                border-radius: 16px;
+                color: white;
+                font-weight: 500;
+                z-index: 1000;
+                animation: slideIn 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                max-width: 320px;
+                backdrop-filter: blur(20px);
+                font-family: inherit;
+                font-size: 15px;
+                letter-spacing: -0.011em;
+            `;
+            
+            const colors = {
+                success: 'rgba(52, 199, 89, 0.9)',
+                error: 'rgba(255, 59, 48, 0.9)',
+                warning: 'rgba(255, 204, 0, 0.9)',
+                info: 'rgba(0, 122, 255, 0.9)'
+            };
+            
+            notification.style.background = colors[type] || colors.info;
+            notification.innerHTML = `<i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'times' : type === 'warning' ? 'exclamation' : 'info'}-circle" style="margin-right: 8px;"></i>${message}`;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s cubic-bezier(0.55, 0.06, 0.68, 0.19)';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+        
+        // 添加iOS风格动画
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from { 
+                    transform: translateX(100%) scale(0.9); 
+                    opacity: 0; 
+                }
+                to { 
+                    transform: translateX(0) scale(1); 
+                    opacity: 1; 
+                }
+            }
+            @keyframes slideOut {
+                from { 
+                    transform: translateX(0) scale(1); 
+                    opacity: 1; 
+                }
+                to { 
+                    transform: translateX(100%) scale(0.9); 
+                    opacity: 0; 
+                }
+            }
+        `;
+        document.head.appendChild(style);
         
         // MQTT 断开连接
         function disconnectMQTT() {
             if (mqttClient) {
                 mqttClient.end();
                 mqttClient = null;
+                showNotification('MQTT 连接已断开', 'info');
             }
-            document.getElementById('mqttStatus').textContent = '未连接';
-            document.getElementById('mqttStatus').style.color = 'gray';
+            updateConnectionStatus('disconnected');
             document.getElementById('mqttConfigPanel').classList.remove('hidden');
         }
         
@@ -637,6 +1285,8 @@
         window.onload = function() {
             initCharts();
             initMap();
+            updateConnectionStatus('disconnected');
+            showNotification('页面加载完成，请配置MQTT连接', 'info');
         };
     </script>
 </body>
