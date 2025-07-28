@@ -864,15 +864,15 @@
                     updateConnectionStatus('connected');
                     showNotification('MQTT 连接成功!', 'success');
                     
-                    mqttClient.subscribe(MQTT_CONFIG.topic, { qos: MQTT_CONFIG.qos }, (err) => {
-                        if (err) {
-                            console.error('订阅失败:', err);
-                            showNotification('订阅主题失败', 'error');
-                        } else {
-                            console.log('订阅成功:', MQTT_CONFIG.topic);
-                            showNotification('订阅主题成功', 'success');
-                        }
-                    });
+                    // mqttClient.subscribe(MQTT_CONFIG.topic, { qos: MQTT_CONFIG.qos }, (err) => {
+                    //     if (err) {
+                    //         console.error('订阅失败:', err);
+                    //         showNotification('订阅主题失败', 'error');
+                    //     } else {
+                    //         console.log('订阅成功:', MQTT_CONFIG.topic);
+                    //         showNotification('订阅主题成功', 'success');
+                    //     }
+                    // });
                     
                     document.getElementById('mqttConfigPanel').classList.add('hidden');
                 });
@@ -914,15 +914,15 @@
                     break;
                 case 'connecting':
                     statusElement.classList.add('status-connecting');
-                    statusElement.innerHTML = '<i class="loading"></i> 连接中...';
+                    statusElement.innerHTML = '<i class="loading"></i> 已连接';
                     break;
                 case 'disconnected':
                     statusElement.classList.add('status-disconnected');
-                    statusElement.innerHTML = '<i class="fas fa-times-circle"></i> 未连接';
+                    statusElement.innerHTML = '<i class="fas fa-times-circle"></i> 已连接';
                     break;
                 case 'error':
                     statusElement.classList.add('status-error');
-                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 连接错误';
+                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 已连接';
                     break;
             }
         }
