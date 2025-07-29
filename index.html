@@ -683,6 +683,9 @@
                         <button class="btn btn-info" onclick="showConfig()">
                             <i class="fas fa-cog"></i> 显示配置
                         </button>
+                        <button class="btn btn-warning btn-smoothing" onclick="toggleSmoothing()">
+                            <i class="fas fa-wave-square"></i> 禁用平滑
+                        </button>
                     </div>
                 </div>
                 
@@ -814,11 +817,32 @@
         let lastUpdateTime = Date.now();
         let messageQueue = [];
         let updatePending = false;
+        let dataWorker = null; // Web Worker 实例
+        let updateTimer = null; // 定时更新计时器
+        let chartUpdateThrottle = 100; // 图表更新频率限制 (ms)
         
-        // 数据存储
+        // 数据平滑配置
+        let smoothingEnabled = true;
+        const SMOOTHING_WINDOW = 5; // 移动平均窗口大小
+        
+        // 数据存储（原始数据和平滑后数据）
         let imuData = {
-            imu0: { av: { x: [], y: [], z: [] }, la: { x: [], y: [], z: [] } },
-            imu1: { av: { x: [], y: [], z: [] }, la: { x: [], y: [], z: [] } }
+            imu0: { 
+                av: { x: [], y: [], z: [] }, 
+                la: { x: [], y: [], z: [] },
+                smoothed: {
+                    av: { x: [], y: [], z: [] },
+                    la: { x: [], y: [], z: [] }
+                }
+            },
+            imu1: { 
+                av: { x: [], y: [], z: [] }, 
+                la: { x: [], y: [], z: [] },
+                smoothed: {
+                    av: { x: [], y: [], z: [] },
+                    la: { x: [], y: [], z: [] }
+                }
+            }
         };
         
         // 图表实例
@@ -832,6 +856,186 @@
         // 地图实例
         let map = null;
         let marker = null;
+        let polyline = null;
+        
+        // 初始化 Web Worker
+        function initWorker() {
+            if (window.Worker) {
+                // 创建 Blob URL
+                const workerCode = `
+                    // 解析综合数据消息
+                    // 格式: "imu0,sec,nsec,ox,oy,oz,avx,avy,avz,lax,lay,laz;imu1,sec,nsec,ox,oy,oz,avx,avy,avz,lax,lay,laz;gnss,lat,lng,alt"
+                    function parseCombinedMessage(message) {
+                        try {
+                            const parts = message.split(';');
+                            const result = {};
+                            
+                            parts.forEach(part => {
+                                const data = part.split(',');
+                                const type = data[0];
+                                
+                                switch(type) {
+                                    case 'imu0':
+                                    case 'imu1':
+                                        if (data.length >= 12) {
+                                            result[type] = {
+                                                type: type,
+                                                timestamp: {
+                                                    sec: parseFloat(data[1]),
+                                                    nsec: parseFloat(data[2])
+                                                },
+                                                orientation: {
+                                                    x: parseFloat(data[3]),
+                                                    y: parseFloat(data[4]),
+                                                    z: parseFloat(data[5])
+                                                },
+                                                angular_velocity: {
+                                                    x: parseFloat(data[6]),
+                                                    y: parseFloat(data[7]),
+                                                    z: parseFloat(data[8])
+                                                },
+                                                linear_acceleration: {
+                                                    x: parseFloat(data[9]),
+                                                    y: parseFloat(data[10]),
+                                                    z: parseFloat(data[11])
+                                                }
+                                            };
+                                        }
+                                        break;
+                                    case 'gnss':
+                                        if (data.length >= 4) {
+                                            result.gnss = {
+                                                type: 'gnss',
+                                                latitude: parseFloat(data[1]),
+                                                longitude: parseFloat(data[2]),
+                                                altitude: parseFloat(data[3])
+                                            };
+                                        }
+                                        break;
+                                }
+                            });
+                            
+                            return result;
+                        } catch (e) {
+                            console.error('解析消息时出错:', e);
+                            return null;
+                        }
+                    }
+
+                    // 应用平滑处理
+                    function applyMovingAverage(data, windowSize = 5) {
+                        if (data.length < windowSize) return data;
+                        
+                        const smoothed = [];
+                        for (let i = 0; i < data.length; i++) {
+                            let sum = 0;
+                            let count = 0;
+                            
+                            // 计算窗口范围
+                            const start = Math.max(0, i - Math.floor(windowSize / 2));
+                            const end = Math.min(data.length - 1, i + Math.floor(windowSize / 2));
+                            
+                            for (let j = start; j <= end; j++) {
+                                sum += data[j];
+                                count++;
+                            }
+                            
+                            smoothed.push(sum / count);
+                        }
+                        
+                        return smoothed;
+                    }
+                    
+                    // 处理一批消息
+                    function processBatch(messages, maxPoints) {
+                        // 创建新数据结构
+                        const result = {
+                            imu0: { av: {x: [], y: [], z: []}, la: {x: [], y: [], z: []} },
+                            imu1: { av: {x: [], y: [], z: []}, la: {x: [], y: [], z: []} },
+                            gnss: []
+                        };
+                        
+                        // 处理每条消息
+                        messages.forEach(message => {
+                            const parsed = parseCombinedMessage(message);
+                            if (!parsed) return;
+                            
+                            // 收集IMU0数据
+                            if (parsed.imu0) {
+                                result.imu0.av.x.push(parsed.imu0.angular_velocity.x);
+                                result.imu0.av.y.push(parsed.imu0.angular_velocity.y);
+                                result.imu0.av.z.push(parsed.imu0.angular_velocity.z);
+                                
+                                result.imu0.la.x.push(parsed.imu0.linear_acceleration.x);
+                                result.imu0.la.y.push(parsed.imu0.linear_acceleration.y);
+                                result.imu0.la.z.push(parsed.imu0.linear_acceleration.z);
+                            }
+                            
+                            // 收集IMU1数据
+                            if (parsed.imu1) {
+                                result.imu1.av.x.push(parsed.imu1.angular_velocity.x);
+                                result.imu1.av.y.push(parsed.imu1.angular_velocity.y);
+                                result.imu1.av.z.push(parsed.imu1.angular_velocity.z);
+                                
+                                result.imu1.la.x.push(parsed.imu1.linear_acceleration.x);
+                                result.imu1.la.y.push(parsed.imu1.linear_acceleration.y);
+                                result.imu1.la.z.push(parsed.imu1.linear_acceleration.z);
+                            }
+                            
+                            // 收集GNSS数据
+                            if (parsed.gnss) {
+                                result.gnss.push({
+                                    latitude: parsed.gnss.latitude,
+                                    longitude: parsed.gnss.longitude,
+                                    altitude: parsed.gnss.altitude
+                                });
+                            }
+                        });
+                        
+                        // 向主线程返回处理后的数据
+                        self.postMessage({
+                            type: 'processedData',
+                            data: result
+                        });
+                    }
+                    
+                    // 监听来自主线程的消息
+                    self.onmessage = function(e) {
+                        const { type, data } = e.data;
+                        
+                        switch(type) {
+                            case 'processBatch':
+                                processBatch(data.messages, data.maxPoints);
+                                break;
+                            default:
+                                console.log('Worker收到未知类型消息:', type);
+                        }
+                    };
+                `;
+                
+                const blob = new Blob([workerCode], { type: 'application/javascript' });
+                const workerUrl = URL.createObjectURL(blob);
+                
+                dataWorker = new Worker(workerUrl);
+                
+                // 设置worker消息处理
+                dataWorker.onmessage = function(e) {
+                    const { type, data } = e.data;
+                    
+                    if (type === 'processedData') {
+                        // 更新数据存储
+                        updateDataFromWorker(data);
+                        // 触发图表更新
+                        scheduleChartUpdate();
+                    }
+                };
+                
+                console.log('Web Worker 初始化成功');
+            } else {
+                console.error('浏览器不支持 Web Worker');
+                // 降级处理: 使用主线程处理
+            }
+        }
         
         // MQTT 连接函数
         function connectMQTT() {
@@ -864,15 +1068,15 @@
                     updateConnectionStatus('connected');
                     showNotification('MQTT 连接成功!', 'success');
                     
-                    // mqttClient.subscribe(MQTT_CONFIG.topic, { qos: MQTT_CONFIG.qos }, (err) => {
-                    //     if (err) {
-                    //         console.error('订阅失败:', err);
-                    //         showNotification('订阅主题失败', 'error');
-                    //     } else {
-                    //         console.log('订阅成功:', MQTT_CONFIG.topic);
-                    //         showNotification('订阅主题成功', 'success');
-                    //     }
-                    // });
+                    mqttClient.subscribe(MQTT_CONFIG.topic, { qos: MQTT_CONFIG.qos }, (err) => {
+                        if (err) {
+                            console.error('订阅失败:', err);
+                            showNotification('订阅主题失败', 'error');
+                        } else {
+                            console.log('订阅成功:', MQTT_CONFIG.topic);
+                            showNotification('订阅主题成功', 'success');
+                        }
+                    });
                     
                     document.getElementById('mqttConfigPanel').classList.add('hidden');
                 });
@@ -914,15 +1118,15 @@
                     break;
                 case 'connecting':
                     statusElement.classList.add('status-connecting');
-                    statusElement.innerHTML = '<i class="loading"></i> 已连接';
+                    statusElement.innerHTML = '<i class="loading"></i> 连接中';
                     break;
                 case 'disconnected':
                     statusElement.classList.add('status-disconnected');
-                    statusElement.innerHTML = '<i class="fas fa-times-circle"></i> 已连接';
+                    statusElement.innerHTML = '<i class="fas fa-times-circle"></i> 连接断开';
                     break;
                 case 'error':
                     statusElement.classList.add('status-error');
-                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 已连接';
+                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 连接错误';
                     break;
             }
         }
@@ -1007,7 +1211,7 @@
             document.getElementById('mqttConfigPanel').classList.remove('hidden');
         }
         
-        // 处理 MQTT 消息
+        // 处理 MQTT 消息 - 新版实现
         function handleMQTTMessage(message) {
             messageCounter++;
             document.getElementById('messageCount').textContent = messageCounter;
@@ -1020,89 +1224,85 @@
             // 将消息加入队列
             messageQueue.push(message);
             
-            // 如果没有待处理的更新，处理队列
-            if (!updatePending) {
-                processQueue();
+            // 队列长度达到阈值或达到时间间隔时处理队列
+            if (messageQueue.length >= 20) { // 批处理阈值
+                processBatchInWorker();
             }
         }
         
-        // 解析综合数据消息
-        // 格式: "imu0,sec,nsec,ox,oy,oz,avx,avy,avz,lax,lay,laz;imu1,sec,nsec,ox,oy,oz,avx,avy,avz,lax,lay,laz;gnss,lat,lng,alt"
-        function parseCombinedMessage(message) {
-            try {
-                const parts = message.split(';');
-                const result = {};
-                
-                parts.forEach(part => {
-                    const data = part.split(',');
-                    const type = data[0];
-                    
-                    switch(type) {
-                        case 'imu0':
-                        case 'imu1':
-                            if (data.length >= 12) {
-                                result[type] = {
-                                    type: type,
-                                    timestamp: {
-                                        sec: parseFloat(data[1]),
-                                        nsec: parseFloat(data[2])
-                                    },
-                                    orientation: {
-                                        x: parseFloat(data[3]),
-                                        y: parseFloat(data[4]),
-                                        z: parseFloat(data[5])
-                                    },
-                                    angular_velocity: {
-                                        x: parseFloat(data[6]),
-                                        y: parseFloat(data[7]),
-                                        z: parseFloat(data[8])
-                                    },
-                                    linear_acceleration: {
-                                        x: parseFloat(data[9]),
-                                        y: parseFloat(data[10]),
-                                        z: parseFloat(data[11])
-                                    }
-                                };
-                            }
-                            break;
-                        case 'gnss':
-                            if (data.length >= 4) {
-                                result.gnss = {
-                                    type: 'gnss',
-                                    latitude: parseFloat(data[1]),
-                                    longitude: parseFloat(data[2]),
-                                    altitude: parseFloat(data[3])
-                                };
-                            }
-                            break;
-                    }
-                });
-                
-                return result;
-            } catch (e) {
-                console.error('解析消息时出错:', e);
-                return null;
-            }
+        // 使用Web Worker批量处理消息
+        function processBatchInWorker() {
+            if (!dataWorker || messageQueue.length === 0) return;
+            
+            // 获取需要处理的消息
+            const messagesToProcess = messageQueue.splice(0, messageQueue.length);
+            
+            // 发送到Worker处理
+            dataWorker.postMessage({
+                type: 'processBatch',
+                data: {
+                    messages: messagesToProcess,
+                    maxPoints: MAX_POINTS
+                }
+            });
         }
         
-        // 实际处理单条消息
-        function processMessage(message) {
-            const parsedData = parseCombinedMessage(message);
-            if (!parsedData) return;
-            
-            // 处理 IMU0 数据
-            if (parsedData.imu0) {
-                updateData('imu0', parsedData.imu0);
+        // 从Worker更新数据
+        function updateDataFromWorker(workerData) {
+            // 更新IMU0数据
+            if (workerData.imu0) {
+                const imu0 = workerData.imu0;
+                
+                // 更新角速度数据
+                appendDataWithLimit(imuData.imu0.av.x, imu0.av.x);
+                appendDataWithLimit(imuData.imu0.av.y, imu0.av.y);
+                appendDataWithLimit(imuData.imu0.av.z, imu0.av.z);
+                
+                // 更新线加速度数据
+                appendDataWithLimit(imuData.imu0.la.x, imu0.la.x);
+                appendDataWithLimit(imuData.imu0.la.y, imu0.la.y);
+                appendDataWithLimit(imuData.imu0.la.z, imu0.la.z);
             }
             
-            // 处理 IMU1 数据
-            if (parsedData.imu1) {
-                updateData('imu1', parsedData.imu1);
+            // 更新IMU1数据
+            if (workerData.imu1) {
+                const imu1 = workerData.imu1;
+                
+                // 更新角速度数据
+                appendDataWithLimit(imuData.imu1.av.x, imu1.av.x);
+                appendDataWithLimit(imuData.imu1.av.y, imu1.av.y);
+                appendDataWithLimit(imuData.imu1.av.z, imu1.av.z);
+                
+                // 更新线加速度数据
+                appendDataWithLimit(imuData.imu1.la.x, imu1.la.x);
+                appendDataWithLimit(imuData.imu1.la.y, imu1.la.y);
+                appendDataWithLimit(imuData.imu1.la.z, imu1.la.z);
             }
             
-            // 处理 GNSS 数据
-            if (parsedData.gnss) {
-                updateMapPosition(parsedData.gnss.longitude, parsedData.gnss.latitude);
+            // 应用平滑处理
+            if (smoothingEnabled) {
+                smoothSensorData('imu0');
+                smoothSensorData('imu1');
+            }
+            
+            // 更新GNSS数据
+            if (workerData.gnss && workerData.gnss.length > 0) {
+                const latestPosition = workerData.gnss[workerData.gnss.length - 1];
+                updateMapPosition(latestPosition.longitude, latestPosition.latitude);
+            }
+            
+            // 更新数据点计数
+            document.getElementById('imu0Count').textContent = imuData.imu0.av.x.length;
+            document.getElementById('imu1Count').textContent = imuData.imu1.av.x.length;
+        }
+        
+        // 添加数据并保持长度限制
+        function appendDataWithLimit(array, newData) {
+            if (!newData || newData.length === 0) return;
+            
+            array.push(...newData);
+            if (array.length > MAX_POINTS) {
+                array.splice(0, array.length - MAX_POINTS);
             }
         }
         
@@ -1213,7 +1413,7 @@
         function initMap() {
             try {
                 // 初始化 Leaflet 地图
-                const map = L.map('map-container').setView([22.30184, 114.184478], 15);
+                map = L.map('map-container').setView([22.30184, 114.184478], 15);
 
                 // 添加 OpenStreetMap 图层
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -1222,20 +1422,12 @@
                 }).addTo(map);
 
                 // 添加标记
-                const marker = L.marker([22.30184, 114.184478]).addTo(map);
+                marker = L.marker([22.30184, 114.184478]).addTo(map);
 
                 // 添加轨迹图层
-                const polyline = L.polyline([], { color: 'blue' }).addTo(map);
-
-                // 更新地图位置的函数
-                window.updateMapPosition = function (lng, lat) {
-                    const position = [lat, lng];
-                    marker.setLatLng(position);
-                    map.setView(position, map.getZoom());
-                    polyline.addLatLng(position); // 添加轨迹点
-                    document.getElementById('positionStatus').textContent =
-                        `经度: ${lng.toFixed(6)}, 纬度: ${lat.toFixed(6)}`;
-                };
+                polyline = L.polyline([], { color: 'blue' }).addTo(map);
+                
+                console.log('地图初始化成功');
             } catch (e) {
                 console.error("地图初始化失败:", e);
                 document.getElementById('map-container').innerHTML =
@@ -1243,20 +1435,129 @@
             }
         }
         
-        // 使用批处理更新图表数据
-        function updateChart(chart, xData, yData, zData) {
-            const createDataPoints = (values) => {
-                return values.map((value, index) => {
-                    return {x: index, y: value};
-                });
-            };
-            
-            chart.data.datasets[0].data = createDataPoints(xData);
-            chart.data.datasets[1].data = createDataPoints(yData);
-            chart.data.datasets[2].data = createDataPoints(zData);
-            chart.update('none');
+        // 更新地图位置
+        function updateMapPosition(lng, lat) {
+            if (!map || !marker || !polyline) return;
+
+            try {
+                const position = [lat, lng];
+                marker.setLatLng(position);
+                polyline.addLatLng(position); // 添加轨迹点
+                
+                // 只在必要时重新定位地图视图
+                const bounds = polyline.getBounds();
+                if (!map.getBounds().contains(position)) {
+                    map.setView(position, map.getZoom());
+                }
+                
+                document.getElementById('positionStatus').textContent = 
+                    `经度: ${lng.toFixed(6)}, 纬度: ${lat.toFixed(6)}`;
+            } catch (e) {
+                console.error("更新地图位置失败:", e);
+            }
         }
         
+        // 平滑处理单个传感器的所有数据
+        function smoothSensorData(sensor) {
+            const sensorData = imuData[sensor];
+            
+            // 平滑角速度数据
+            sensorData.smoothed.av.x = applyMovingAverage(sensorData.av.x);
+            sensorData.smoothed.av.y = applyMovingAverage(sensorData.av.y);
+            sensorData.smoothed.av.z = applyMovingAverage(sensorData.av.z);
+            
+            // 平滑线加速度数据
+            sensorData.smoothed.la.x = applyMovingAverage(sensorData.la.x);
+            sensorData.smoothed.la.y = applyMovingAverage(sensorData.la.y);
+            sensorData.smoothed.la.z = applyMovingAverage(sensorData.la.z);
+        }
+        
+        // 添加平滑处理函数
+        function applyMovingAverage(data, windowSize = SMOOTHING_WINDOW) {
+            if (data.length < windowSize) return data;
+            
+            const smoothed = [];
+            for (let i = 0; i < data.length; i++) {
+                let sum = 0;
+                let count = 0;
+                
+                // 计算窗口范围
+                const start = Math.max(0, i - Math.floor(windowSize / 2));
+                const end = Math.min(data.length - 1, i + Math.floor(windowSize / 2));
+                
+                for (let j = start; j <= end; j++) {
+                    sum += data[j];
+                    count++;
+                }
+                
+                smoothed.push(sum / count);
+            }
+            
+            return smoothed;
+        }
+        
+        // 切换平滑处理
+        function toggleSmoothing() {
+            smoothingEnabled = !smoothingEnabled;
+            
+            // 更新按钮状态
+            const button = document.querySelector('.btn-smoothing');
+            if (smoothingEnabled) {
+                button.innerHTML = '<i class="fas fa-wave-square"></i> 禁用平滑';
+                button.className = 'btn btn-warning btn-smoothing';
+            } else {
+                button.innerHTML = '<i class="fas fa-chart-line"></i> 启用平滑';
+                button.className = 'btn btn-success btn-smoothing';
+            }
+            
+            // 重新处理所有数据
+            smoothSensorData('imu0');
+            smoothSensorData('imu1');
+            
+            // 立即更新图表
+            updateAllCharts();
+            
+            showNotification(
+                smoothingEnabled ? '数据平滑已启用' : '数据平滑已禁用', 
+                'info'
+            );
+        }
+        
+        // 安排图表更新 - 使用节流控制更新频率
+        function scheduleChartUpdate() {
+            if (updateTimer) return; // 已经有待执行的更新
+            
+            updateTimer = setTimeout(() => {
+                updateTimer = null;
+                updateAllCharts();
+                
+                // 如果队列中还有消息，继续处理
+                if (messageQueue.length > 0) {
+                    processBatchInWorker();
+                }
+            }, chartUpdateThrottle);
+        }
+
+        // 使用批处理更新图表数据
+        function updateChart(chart, xData, yData, zData) {
+            // 根据平滑设置选择数据源
+            const dataToUse = smoothingEnabled ? 
+                { x: xData.smoothed || xData.raw, 
+                  y: yData.smoothed || yData.raw, 
+                  z: zData.smoothed || zData.raw } :
+                { x: xData.raw || xData, 
+                  y: yData.raw || yData, 
+                  z: zData.raw || zData };
+            
+            // 直接更新数据集而不是重新创建
+            chart.data.datasets[0].data = dataToUse.x.map((v, i) => ({x: i, y: v}));
+            chart.data.datasets[1].data = dataToUse.y.map((v, i) => ({x: i, y: v}));
+            chart.data.datasets[2].data = dataToUse.z.map((v, i) => ({x: i, y: v}));
+            
+            // 使用none模式避免不必要的动画
+            chart.update('none');
+        }
+
         // 使用请求动画帧更新图表，避免阻塞UI
         function updateAllCharts() {
             if (updatePending) return;
@@ -1276,113 +1577,92 @@
                 }
                 lastUpdateTime = now;
                 
+                // 获取要显示的数据（原始或平滑）
+                const getData = (sensor, type) => {
+                    if (smoothingEnabled) {
+                        return imuData[sensor].smoothed[type];
+                    } else {
+                        return imuData[sensor][type];
+                    }
+                };
+                
                 updateChart(charts.imu0Av, 
-                    imuData.imu0.av.x, 
-                    imuData.imu0.av.y, 
-                    imuData.imu0.av.z
+                    { raw: imuData.imu0.av.x, smoothed: imuData.imu0.smoothed.av.x },
+                    { raw: imuData.imu0.av.y, smoothed: imuData.imu0.smoothed.av.y },
+                    { raw: imuData.imu0.av.z, smoothed: imuData.imu0.smoothed.av.z }
                 );
                 
                 updateChart(charts.imu0La, 
-                    imuData.imu0.la.x, 
-                    imuData.imu0.la.y, 
-                    imuData.imu0.la.z
+                    { raw: imuData.imu0.la.x, smoothed: imuData.imu0.smoothed.la.x },
+                    { raw: imuData.imu0.la.y, smoothed: imuData.imu0.smoothed.la.y },
+                    { raw: imuData.imu0.la.z, smoothed: imuData.imu0.smoothed.la.z }
                 );
                 
                 updateChart(charts.imu1Av, 
-                    imuData.imu1.av.x, 
-                    imuData.imu1.av.y, 
-                    imuData.imu1.av.z
+                    { raw: imuData.imu1.av.x, smoothed: imuData.imu1.smoothed.av.x },
+                    { raw: imuData.imu1.av.y, smoothed: imuData.imu1.smoothed.av.y },
+                    { raw: imuData.imu1.av.z, smoothed: imuData.imu1.smoothed.av.z }
                 );
                 
                 updateChart(charts.imu1La, 
-                    imuData.imu1.la.x, 
-                    imuData.imu1.la.y, 
-                    imuData.imu1.la.z
+                    { raw: imuData.imu1.la.x, smoothed: imuData.imu1.smoothed.la.x },
+                    { raw: imuData.imu1.la.y, smoothed: imuData.imu1.smoothed.la.y },
+                    { raw: imuData.imu1.la.z, smoothed: imuData.imu1.smoothed.la.z }
                 );
                 
                 updatePending = false;
-                
-                // 处理队列中的消息
-                processQueue();
             });
-        }
-        
-        // 更新地图位置 (适配 OpenStreetMap 和 Leaflet.js)
-        function updateMapPosition(lng, lat) {
-            if (!map || !marker) return;
-
-            try {
-                const position = [lat, lng];
-                marker.setLatLng(position);
-                map.setView(position, map.getZoom());
-                document.getElementById('positionStatus').textContent = 
-                    `经度: ${lng.toFixed(6)}, 纬度: ${lat.toFixed(6)}`;
-            } catch (e) {
-                console.error("更新地图位置失败:", e);
-            }
-        }
-        
-        // 处理消息队列
-        function processQueue() {
-            if (messageQueue.length === 0 || updatePending) return;
-            
-            // 批量处理数据，减少更新次数
-            const processCount = Math.min(messageQueue.length, 10);
-            for (let i = 0; i < processCount; i++) {
-                const data = messageQueue.shift();
-                processMessage(data);
-            }
-            
-            // 更新数据点计数
-            document.getElementById('imu0Count').textContent = imuData.imu0.av.x.length;
-            document.getElementById('imu1Count').textContent = imuData.imu1.av.x.length;
-            
-            // 更新图表
-            updateAllCharts();
-        }
-        
-        // 更新数据缓冲区
-        function updateData(sensor, msg) {
-            const addData = (arr, value) => {
-                arr.push(value);
-                if (arr.length > MAX_POINTS) arr.shift();
-            };
-            
-            try {
-                // 更新角速度数据
-                addData(imuData[sensor].av.x, msg.angular_velocity.x);
-                addData(imuData[sensor].av.y, msg.angular_velocity.y);
-                addData(imuData[sensor].av.z, msg.angular_velocity.z);
-                
-                // 更新线加速度数据
-                addData(imuData[sensor].la.x, msg.linear_acceleration.x);
-                addData(imuData[sensor].la.y, msg.linear_acceleration.y);
-                addData(imuData[sensor].la.z, msg.linear_acceleration.z);
-            } catch (e) {
-                console.error("更新数据时出错:", e);
-            }
         }
         
         // 清空数据
         function clearData() {
             imuData = {
-                imu0: { av: { x: [], y: [], z: [] }, la: { x: [], y: [], z: [] } },
-                imu1: { av: { x: [], y: [], z: [] }, la: { x: [], y: [], z: [] } }
+                imu0: { 
+                    av: { x: [], y: [], z: [] }, 
+                    la: { x: [], y: [], z: [] },
+                    smoothed: {
+                        av: { x: [], y: [], z: [] },
+                        la: { x: [], y: [], z: [] }
+                    }
+                },
+                imu1: { 
+                    av: { x: [], y: [], z: [] }, 
+                    la: { x: [], y: [], z: [] },
+                    smoothed: {
+                        av: { x: [], y: [], z: [] },
+                        la: { x: [], y: [], z: [] }
+                    }
+                }
             };
             
             document.getElementById('imu0Count').textContent = "0";
             document.getElementById('imu1Count').textContent = "0";
             
             messageQueue = [];
+            
+            // 清空轨迹线
+            if (polyline) {
+                polyline.setLatLngs([]);
+            }
+            
             updateAllCharts();
+            showNotification('所有数据已清空', 'info');
         }
         
         // 页面加载完成后初始化
         window.onload = function() {
             initCharts();
             initMap();
+            initWorker();
             updateConnectionStatus('disconnected');
             showNotification('页面加载完成，请配置MQTT连接', 'info');
+            
+            // 启动定时轮询处理
+            setInterval(() => {
+                if (messageQueue.length > 0) {
+                    processBatchInWorker();
+                }
+            }, 500); // 每500ms检查队列
         };
     </script>
 </body>
