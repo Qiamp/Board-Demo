@@ -1308,7 +1308,21 @@
         
         // 初始化图表
         function initCharts() {
-            const createChart = (elementId, title, labels) => {
+            const createChart = (elementId, title, labels, yAxisConfig = {}) => {
+                const defaultYAxisConfig = {
+                    beginAtZero: false,
+                    title: {
+                        display: true,
+                        text: title
+                    },
+                    ticks: {
+                        maxTicksLimit: 6
+                    }
+                };
+                
+                // 合并自定义配置和默认配置
+                const yAxis = { ...defaultYAxisConfig, ...yAxisConfig };
+                
                 return new Chart(document.getElementById(elementId), {
                     type: 'line',
                     data: {
@@ -1352,16 +1366,7 @@
                                     maxTicksLimit: 10
                                 }
                             },
-                            y: { 
-                                beginAtZero: false,
-                                title: {
-                                    display: true,
-                                    text: title
-                                },
-                                ticks: {
-                                    maxTicksLimit: 6
-                                }
-                            }
+                            y: yAxis
                         },
                         animation: false,
                         elements: {
@@ -1384,10 +1389,39 @@
                 });
             };
             
+            // 为角速度图表设置 y 轴范围为 -200 到 200
+            const angularVelocityYAxis = {
+                beginAtZero: false,
+                min: -200,
+                max: 200,
+                title: {
+                    display: true,
+                    text: 'IMU0 角速度'
+                },
+                ticks: {
+                    maxTicksLimit: 6
+                }
+            };
+            
+            // 为角速度图表设置 y 轴范围为 -200 到 200
+            const angularVelocityYAxis1 = {
+                beginAtZero: false,
+                min: -200,
+                max: 200,
+                title: {
+                    display: true,
+                    text: 'IMU1 角速度'
+                },
+                ticks: {
+                    maxTicksLimit: 6
+                }
+            };
+            
             charts.imu0Av = createChart(
                 'imu0AngularVelocityChart', 
                 'IMU0 角速度', 
-                ['X 轴', 'Y 轴', 'Z 轴']
+                ['X 轴', 'Y 轴', 'Z 轴'],
+                angularVelocityYAxis
             );
             
             charts.imu0La = createChart(
@@ -1399,7 +1433,8 @@
             charts.imu1Av = createChart(
                 'imu1AngularVelocityChart', 
                 'IMU1 角速度', 
-                ['X 轴', 'Y 轴', 'Z 轴']
+                ['X 轴', 'Y 轴', 'Z 轴'],
+                angularVelocityYAxis1
             );
             
             charts.imu1La = createChart(
